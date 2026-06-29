@@ -1,3 +1,4 @@
+# equivelant of json.lock file for python
 run-docker-compose:
 	uv sync
 	docker compose up --build
