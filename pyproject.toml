@@ -20,6 +20,7 @@ members = ["apps/api", "apps/chatbot_ui"]
 
 [dependency-groups]
 dev = [
+    "cohere>=7.0.5",
     "langchain-community>=0.4.0,<0.4.2",
     "langchain-google-vertexai>=3.2.4",
     "langchain-openai>=1.1.9",
