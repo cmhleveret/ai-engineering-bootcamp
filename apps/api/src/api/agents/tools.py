@@ -76,7 +76,7 @@ def retrieve_data(query, qdrant_client, k=5, hybrid=True):
 
     for result in results.points:
         retrieved_context_ids.append(result.payload["parent_asin"])
-        retrieved_context.append(result.payload["preprocessed_description"])
+        retrieved_context.append(result.payload["preprocess_description"])
         similarity_scores.append(result.score)
         retrieved_context_ratings.append(result.payload["average_rating"])
 

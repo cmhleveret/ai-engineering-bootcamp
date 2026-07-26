@@ -76,10 +76,14 @@ if prompt := st.chat_input("Hello! How can I assist you today?"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        state, output = api_call("post", f"{config.API_URL}/agents", json={"query": prompt})
+        state, output = api_call("post", f"{config.API_URL}/agent/", json={"query": prompt})
 
-        answer = output["answer"]
-        used_context = output["used_context"]
+        if not state:
+            answer = output.get("message") or output.get("detail") or "Something went wrong."
+            used_context = []
+        else:
+            answer = output["answer"]
+            used_context = output["used_context"]
 
         st.session_state.used_context = used_context
 
