@@ -8,6 +8,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
+from langgraph.checkpoint.postgres import PostgresSaver
 
 class State(BaseModel):
     messages: Annotated[List[Any], add] = []
@@ -72,25 +73,30 @@ workflow.add_edge("tool_node", "agent_node")
 
 graph = workflow.compile()
 
+### Agent Execution   
+def agent_wrapper(question: str, thread_id: str) -> dict:
 
-### Agent Execution
-def run_agent(question: str) -> dict:
-
+    qdrant_client = QdrantClient(url="http://qdrant:6333")
+    
     initial_state = {
         "messages": [HumanMessage(content=question)],
         "iteration": 0,
     }
 
-    result = graph.invoke(initial_state)
+    config = {
+        "configurable": {
+            "thread_id": thread_id
+        }
+    }
 
-    return result
+    with PostgresSaver.from_conn_string(
+        "postgresql://langgraph_user:langgraph_password@postgres:5432/langgraph_db"
+    ) as checkpointer:
 
-def agent_wrapper(question: str) -> dict:
+        graph = workflow.compile(checkpointer=checkpointer)
 
-    qdrant_client = QdrantClient(url="http://qdrant:6333")
-
-    result = run_agent(question)
-
+        result = graph.invoke(initial_state, config)
+ 
     used_context = []
 
     for item in result.get("references", []):
