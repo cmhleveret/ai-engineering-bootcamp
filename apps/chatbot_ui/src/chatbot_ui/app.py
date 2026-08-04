@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 from chatbot_ui.core.config import config
+import json
 import uuid
 
 st.set_page_config(
@@ -47,6 +48,51 @@ def api_call(method, url, **kwargs):
     except Exception as e:
         _show_error_popup(f"An unexpected error occurred: {str(e)}")
         return False, {"message": str(e)}
+
+
+def stream_agent_call(url, payload):
+    """Consume the agent's SSE stream.
+
+    Yields ("status", text) for progress updates, ("final", data) for the
+    completed answer, and ("error", message) if the call fails.
+    """
+    try:
+        with requests.post(url, json=payload, stream=True) as response:
+            if not response.ok:
+                try:
+                    body = response.json()
+                    message = body.get("message") or body.get("detail")
+                except requests.exceptions.JSONDecodeError:
+                    message = None
+                yield "error", message or f"Request failed with status {response.status_code}."
+                return
+
+            for line in response.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data:"):
+                    continue
+
+                content = line[len("data:"):].strip()
+                if not content:
+                    continue
+
+                # Progress updates are plain text; the final answer is a JSON event.
+                try:
+                    event = json.loads(content)
+                except json.JSONDecodeError:
+                    yield "status", content
+                    continue
+
+                if isinstance(event, dict) and event.get("type") == "final_answer":
+                    yield "final", event.get("data", {})
+                else:
+                    yield "status", content
+
+    except requests.exceptions.ConnectionError:
+        yield "error", "Connection error. Please check your network connection."
+    except requests.exceptions.Timeout:
+        yield "error", "The request timed out. Please try again later."
+    except Exception as e:
+        yield "error", f"An unexpected error occurred: {str(e)}"
 
 
 def submit_feedback(feedback_type=None, feedback_text=""):
@@ -188,16 +234,33 @@ if prompt := st.chat_input("Hello! How can I assist you today?"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        state, output = api_call("post", f"{config.API_URL}/agent/", json={"query": prompt, "thread_id": st.session_state.thread_id})
+        status_placeholder = st.empty()
 
-        if not state:
-            answer = output.get("message") or output.get("detail") or "Something went wrong."
+        answer = None
+        used_context = []
+        trace_id = ""
+        error = None
+
+        for kind, data in stream_agent_call(
+            f"{config.API_URL}/agent/",
+            {"query": prompt, "thread_id": st.session_state.thread_id},
+        ):
+            if kind == "status":
+                status_placeholder.caption(f"⏳ {data}")
+            elif kind == "final":
+                answer = data.get("answer", "")
+                used_context = data.get("used_context", [])
+                trace_id = data.get("trace_id", "")
+            elif kind == "error":
+                error = data
+                break
+
+        status_placeholder.empty()
+
+        if answer is None:
+            answer = error or "Something went wrong."
             used_context = []
             trace_id = ""
-        else:
-            answer = output["answer"]
-            used_context = output["used_context"]
-            trace_id = output.get("trace_id", "")
 
         st.session_state.used_context = used_context
         st.session_state.trace_id = trace_id
