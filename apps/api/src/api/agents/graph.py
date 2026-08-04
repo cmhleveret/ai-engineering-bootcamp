@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Annotated, List, Any
 from operator import add
 from api.agents.agents import RAGUsedContext, agent_node, intent_router_node
-from api.agents.tools import get_formatted_item_context
+from api.agents.tools import get_formatted_item_context, get_formatted_reviews_context
 from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
@@ -17,10 +17,11 @@ class State(BaseModel):
     answer: str = ""
     final_answer: bool = False
     references: list[RAGUsedContext] = []
+    trace_id: str = ""
 
 
 ### Edges
-def tool_router(state: State) -> str:
+def tool_router(state: State) -> str: 
 
     if state.final_answer:
         return "end"
@@ -42,7 +43,7 @@ def intent_router_conditional_edges(state: State) -> str:
 ### Workflow
 workflow = StateGraph(State)
 
-tools = [get_formatted_item_context]
+tools = [get_formatted_item_context, get_formatted_reviews_context]
 tool_node = ToolNode(tools)
 
 workflow.add_node("tool_node", tool_node)
@@ -74,7 +75,33 @@ workflow.add_edge("tool_node", "agent_node")
 graph = workflow.compile()
 
 ### Agent Execution   
-def agent_wrapper(question: str, thread_id: str) -> dict:
+def agent_stream_wrapper(question: str, thread_id: str) -> dict:
+### process stream data
+
+### format for sse
+    def _string_for_sse(string):
+        return f"data: {string}\n\n"
+
+    def _process_graph_event(chunk):
+
+        def _is_node_start(chunk):
+            return chunk[1].get("type") == "task"
+
+        def _tool_to_text(tool_call):
+            if tool_call.get("name") == "get_formatted_item_context":
+                return f"Looking for items: {tool_call.get('args').get('query', '')}."
+            elif tool_call.get("name") == "get_formatted_reviews_context":
+                return f"Fetching user reviews..."
+
+        if _is_node_start(chunk):
+            if chunk[1].get("payload", {}).get("name") == "intent_router_node":
+                 return "Analysing the question..."
+            if chunk[1].get("payload", {}).get("name") == "agent_node":
+                return "Planning..."
+            if chunk[1].get("payload", {}).get("name") == "tool_node":
+                message = " ".join([_tool_to_text(tool_call) for tool_call in chunk[1].get('payload', {}).get('input', {}).messages[-1].tool_calls])
+                return message
+
 
     qdrant_client = QdrantClient(url="http://qdrant:6333")
     
@@ -95,7 +122,21 @@ def agent_wrapper(question: str, thread_id: str) -> dict:
 
         graph = workflow.compile(checkpointer=checkpointer)
 
-        result = graph.invoke(initial_state, config)
+        for chunk in graph.stream(
+            initial_state,
+            config=config,
+            stream_mode=["debug", "values"]
+        ):
+
+            processed_chunk = _process_graph_event(chunk)
+
+### the yield transforms the fn into a generator - to return a stream
+            if processed_chunk:
+                yield _string_for_sse(processed_chunk)
+
+### we yield until we reurn the final state
+            if chunk[0] == "values":
+                result = chunk[1]
  
     used_context = []
 
@@ -124,7 +165,13 @@ def agent_wrapper(question: str, thread_id: str) -> dict:
                 }
             )
 
-    return {
-        "answer": result.get("answer", ""),
-        "used_context": used_context
-    }
+    yield _string_for_sse(json.dumps(
+        {
+            "type": "final_answer",
+            "data": {
+                "answer": result.get("answer", ""),
+                "used_context": used_context,
+                "trace_id": result.get("trace_id", "")
+            }
+        }
+    ))

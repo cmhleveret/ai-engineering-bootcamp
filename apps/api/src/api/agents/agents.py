@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, convert_to_openai_messages, AIMessage
 from langchain_openai import ChatOpenAI
 from api.agents.utils.prompt_management import prompt_template_config
-from api.agents.tools import get_formatted_item_context
+from api.agents.tools import get_formatted_item_context, get_formatted_reviews_context
 
 ### not going to import state in this case to prevent circular dependancies
 
@@ -46,7 +46,7 @@ def agent_node(state) -> dict:
         use_responses_api=True
     )
     llm_with_tools = llm.bind_tools(
-        [get_formatted_item_context, FinalResponse],
+        [get_formatted_item_context, FinalResponse, get_formatted_reviews_context],
         tool_choice="required"
     )
 
@@ -135,9 +135,12 @@ def intent_router_node(state) -> dict:
             "output_tokens": raw_response.usage.output_tokens,
             "total_tokens": raw_response.usage.total_tokens,
         }
-
+        trace_id = str(current_run.trace_id)
+    else:
+        trace_id = ""
 
     return {
         "question_relevant": response.question_relevant,
-        "answer": response.answer
+        "answer": response.answer,
+         "trace_id": trace_id
     }

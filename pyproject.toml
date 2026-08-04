@@ -16,13 +16,20 @@ dependencies = [
 ]
 
 [tool.uv.workspace]
-members = ["apps/api", "apps/chatbot_ui"]
+members = [
+    "apps/api",
+    "apps/chatbot_ui",
+    "apps/items_mcp_server",
+    "apps/reviews_mcp_server",
+]
 
 [dependency-groups]
 dev = [
     "cohere>=7.0.5",
+    "fastmcp>=3.4.5",
     "langchain-community>=0.4.0,<0.4.2",
     "langchain-google-vertexai>=3.2.4",
+    "langchain-mcp-adapters>=0.3.1",
     "langchain-openai>=1.1.9",
     "langgraph>=1.2.7",
     "langgraph-checkpoint>=4.1.1",
