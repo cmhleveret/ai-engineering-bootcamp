@@ -124,11 +124,17 @@ if "messages" not in st.session_state:
 if "used_context" not in st.session_state:
     st.session_state.used_context = []
 
+if "shopping_cart" not in st.session_state:
+    st.session_state.shopping_cart = []
+
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = thread_id
 
 if "trace_id" not in st.session_state:
     st.session_state.trace_id = ""
+
+if "shopping_cart" not in st.session_state:
+    st.session_state.shopping_cart = None
 
 # Feedback state for the most recent assistant answer
 if "latest_feedback" not in st.session_state:
@@ -140,9 +146,11 @@ if "show_feedback_box" not in st.session_state:
 if "feedback_submission_status" not in st.session_state:
     st.session_state.feedback_submission_status = None
 
+
+
 with st.sidebar:
 
-    suggestions_tab, = st.tabs(["🔍 Suggestions"])
+    suggestions_tab, shopping_cart_tab = st.tabs(["🔍 Suggestions", "🛒 Shopping Cart"])
 
     with suggestions_tab:
         if st.session_state.used_context:
@@ -155,6 +163,20 @@ with st.sidebar:
         else:
             st.info("No suggestions yet")
 
+    with shopping_cart_tab:
+        if st.session_state.shopping_cart:
+            
+            for idx, item in enumerate(st.session_state.shopping_cart):
+                st.caption(item.get('description', 'No description'))
+                if 'product_image_url' in item:
+                    st.image(item["product_image_url"], width=250)
+                st.caption(f"Price: {item['price']} {item['currency']}")
+                st.caption(f"Quantity: {item['quantity']}")
+                st.caption(f"Total price: {item['total_price']} {item['currency']}")
+                st.divider()
+        else:
+            st.info("Your cart is empty")
+            
 
 for idx, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
@@ -251,6 +273,7 @@ if prompt := st.chat_input("Hello! How can I assist you today?"):
                 answer = data.get("answer", "")
                 used_context = data.get("used_context", [])
                 trace_id = data.get("trace_id", "")
+                shopping_cart = data.get("shopping_cart", [])
             elif kind == "error":
                 error = data
                 break
@@ -264,6 +287,7 @@ if prompt := st.chat_input("Hello! How can I assist you today?"):
 
         st.session_state.used_context = used_context
         st.session_state.trace_id = trace_id
+        st.session_state.shopping_cart = shopping_cart
 
         st.write(answer)
 

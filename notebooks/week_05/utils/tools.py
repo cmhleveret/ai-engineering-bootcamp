@@ -2,12 +2,14 @@ import openai
 import cohere
 from qdrant_client import QdrantClient
 from langsmith import traceable, get_current_run_tree
-from qdrant_client.models import Prefetch, Document
+from qdrant_client.models import Prefetch, Document, FusionQuery, Filter, FieldCondition, MatchAny, MatchValue
 from qdrant_client import models
 from langchain_core.tools import tool
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import numpy as np
+
 
 @traceable(
     name="embed_query",
@@ -32,9 +34,8 @@ def get_embedding(text, model="text-embedding-3-small"):
 
     return response.data[0].embedding
 
-
-
 ### Items metadata retrieval tool
+
 @traceable(
     name="retrieve_data",
     run_type="retriever"
@@ -79,7 +80,7 @@ def retrieve_items_data(query, qdrant_client, k=5, hybrid=True):
 
     for result in results.points:
         retrieved_context_ids.append(result.payload["parent_asin"])
-        retrieved_context.append(result.payload["preprocess_description"])
+        retrieved_context.append(result.payload["preprocessed_description"])
         similarity_scores.append(result.score)
         retrieved_context_ratings.append(result.payload["average_rating"])
 
@@ -158,7 +159,7 @@ Returns:
     average rating.
     """
 
-    qdrant_client = QdrantClient(url="http://qdrant:6333")
+    qdrant_client = QdrantClient(url="http://localhost:6333")
 
     retrieved_context = retrieve_items_data(
         query,
@@ -171,16 +172,8 @@ Returns:
 
     return formatted_context
 
-def get_embedding(text, model="text-embedding-3-small"):
-    response = openai.embeddings.create(
-        input=text,
-        model=model
-    )
+### Reviews metadata retrieval tool
 
-    return response.data[0].embedding
-
-
-### reviews metadata retrieval tool
 @traceable(
     name="retrieve_prefiltered_reviews_data",
     run_type="retriever"
@@ -254,7 +247,7 @@ def get_formatted_reviews_context(query: str, parent_asins: list[str], top_k: in
         A string of the top k context chunks with IDs prepending each chunk, each representing a review for a given inventory item for a given query.
     """
 
-    qdrant_client = QdrantClient(url="http://qdrant:6333")
+    qdrant_client = QdrantClient(url="http://localhost:6333")
 
     retrieved_context = retrieve_prefiltered_reviews_data(
         query,
@@ -286,11 +279,11 @@ def add_to_shopping_cart(items: list[dict], user_id: str, cart_id: str) -> str:
     """
 
     conn = psycopg2.connect(
-        host=config.SUPABASE_URL,
-        port=5432,
-        database="postgres",
-        user=config.SUPABASE_TOOLS_USER,
-        password=config.SUPABASE_TOOLS_PASSWORD
+        host="localhost",
+        port=5433,
+        database="tools_database",
+        user="tools_user",
+        password="tools_user_password"
     )
     conn.autocommit = True
 
@@ -300,10 +293,7 @@ def add_to_shopping_cart(items: list[dict], user_id: str, cart_id: str) -> str:
             product_id = item['product_id']
             quantity = item['quantity']
 
-            qdrant_client = QdrantClient(
-                url=config.QDRANT_URL,
-                api_key=config.QDRANT_API_KEY
-            )
+            qdrant_client = QdrantClient(url="http://localhost:6333")
 
             dummy_vector = np.zeros(1536).tolist()
             payload = qdrant_client.query_points(
@@ -389,49 +379,11 @@ def get_shopping_cart(user_id: str, cart_id: str) -> list[dict]:
     """
     
     conn = psycopg2.connect(
-        host=config.SUPABASE_URL,
-        port=5432,
-        database="postgres",
-        user=config.SUPABASE_TOOLS_USER,
-        password=config.SUPABASE_TOOLS_PASSWORD
-    )
-    conn.autocommit = True
-
-    with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-
-        query = """
-                SELECT 
-                    product_id, price, quantity,
-                    currency, product_image_url,
-                    (price * quantity) as total_price
-                FROM shopping_carts.shopping_cart_items 
-                WHERE user_id = %s AND shopping_cart_id = %s
-                ORDER BY added_at DESC
-            """
-        cursor.execute(query, (user_id, cart_id))
-
-        return [dict(row) for row in cursor.fetchall()]
-
-
-def get_shopping_cart_for_sse(user_id: str, cart_id: str) -> list[dict]:
-
-    """
-    Retrieve all items in a user's shopping cart.
-    
-    Args:
-        user_id: User identifier
-        cart_id: Cart identifier
-    
-    Returns:
-        List of dictionaries containing cart items
-    """
-    
-    conn = psycopg2.connect(
-        host=config.SUPABASE_URL,
-        port=5432,
-        database="postgres",
-        user=config.SUPABASE_TOOLS_USER,
-        password=config.SUPABASE_TOOLS_PASSWORD
+        host="localhost",
+        port=5433,
+        database="tools_database",
+        user="tools_user",
+        password="tools_user_password"
     )
     conn.autocommit = True
 
@@ -469,11 +421,11 @@ def remove_from_cart(product_id: str, user_id: str, cart_id: str) -> str:
     """
     
     conn = psycopg2.connect(
-        host=config.SUPABASE_URL,
-        port=5432,
-        database="postgres",
-        user=config.SUPABASE_TOOLS_USER,
-        password=config.SUPABASE_TOOLS_PASSWORD
+        host="localhost",
+        port=5433,
+        database="tools_database",
+        user="tools_user",
+        password="tools_user_password"
     )
     conn.autocommit = True
 
@@ -510,11 +462,11 @@ def check_warehouse_availability(items: list[dict]) -> dict:
     """
     
     conn = psycopg2.connect(
-        host=config.SUPABASE_URL,
-        port=5432,
-        database="postgres",
-        user=config.SUPABASE_TOOLS_USER,
-        password=config.SUPABASE_TOOLS_PASSWORD
+        host="localhost",
+        port=5433,
+        database="tools_database",
+        user="tools_user",
+        password="tools_user_password"
     )
     
     try:
@@ -652,11 +604,11 @@ def reserve_warehouse_items(reservations: list[dict]) -> dict:
     """
     
     conn = psycopg2.connect(
-        host=config.SUPABASE_URL,
-        port=5432,
-        database="postgres",
-        user=config.SUPABASE_TOOLS_USER,
-        password=config.SUPABASE_TOOLS_PASSWORD
+        host="localhost",
+        port=5433,
+        database="tools_database",
+        user="tools_user",
+        password="tools_user_password"
     )
     conn.autocommit = False  # Use transaction
     
